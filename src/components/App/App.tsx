@@ -1,4 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useQuery, keepPreviousData } from "@tanstack/react-query";
+
 import css from "./App.module.css";
 import { Toaster, toast } from "react-hot-toast";
 import type { Movie } from "../../types/movie";
@@ -11,43 +13,26 @@ import MovieModal from "../MovieModal/MovieModal";
 import ReactPaginate from "react-paginate";
 
 export default function App() {
-  const [allMovies, setAllMovies] = useState<Movie[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [isError, setIsError] = useState(false);
-  const [selectedMovie, setSelectedMovie] = useState<Movie | null>(null);
+  const [query, setQuery] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
-  const moviesPerPage = 10; // Кількість фільмів на сторінці
+  const [selectedMovie, setSelectedMovie] = useState<Movie | null>(null);
 
-  const handleSubmit = async (searchValue: string) => {
-    setAllMovies([]);
+  const { data, isLoading, isError, isSuccess } = useQuery({
+    queryKey: ["movies", query, currentPage],
+    queryFn: () => fetchMovies(query, currentPage),
+    enabled: query !== "",
+    placeholderData: keepPreviousData,
+  });
+
+  const movies = data?.results ?? [];
+  const totalPages = data?.total_pages ?? 0;
+
+  const handleSearch = async (newQuery: string) => {
+    setQuery(newQuery);
     setCurrentPage(1);
-    setIsLoading(true);
-    setIsError(false);
-
-    try {
-      const fetchedMovies = await fetchMovies(searchValue);
-      if (fetchedMovies.length === 0) {
-        toast.error("Фільми не знайдено за вашим запитом.");
-      }
-      setAllMovies(fetchedMovies);
-    } catch (error: unknown) {
-      if (error instanceof Error) {
-        toast.error(`Помилка завантаження фільмів: ${error.message}`);
-      } else {
-        toast.error("Помилка завантаження фільмів.");
-      }
-      setIsError(true);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handlePageChange = ({ selected }: { selected: number }) => {
-    setCurrentPage(selected + 1);
   };
 
   const handleSelect = (movie: Movie) => {
-    if (!movie) return;
     setSelectedMovie(movie);
   };
 
@@ -55,41 +40,37 @@ export default function App() {
     setSelectedMovie(null);
   };
 
-  // Обчислення фільмів для поточної сторінки
-  const totalPages = Math.ceil(allMovies.length / moviesPerPage);
-  const startIndex = (currentPage - 1) * moviesPerPage;
-  const currentMovies = allMovies.slice(startIndex, startIndex + moviesPerPage);
+  useEffect(() => {
+    if (isSuccess && movies.length === 0 && query !== "") {
+      toast.error("No movies found for your request.");
+    }
+  }, [isSuccess, movies.length, query]);
 
   return (
     <div className={css.app}>
+      <SearchBar onSubmit={handleSearch} />
+      {isSuccess && totalPages > 1 && (
+        <ReactPaginate
+          pageCount={totalPages}
+          pageRangeDisplayed={5}
+          marginPagesDisplayed={1}
+          onPageChange={({ selected }) => setCurrentPage(selected + 1)}
+          forcePage={currentPage - 1}
+          containerClassName={css.pagination}
+          activeClassName={css.active}
+          nextLabel="→"
+          previousLabel="←"
+        />
+      )}
       <Toaster position="top-center" />
-      <SearchBar onSubmit={handleSubmit} />
-      {isLoading ? (
-        <Loader />
-      ) : (
-        <>
-          {currentMovies.length > 0 && (
-            <MovieGrid onSelect={handleSelect} movies={currentMovies} />
-          )}
-          {totalPages > 1 && (
-            <ReactPaginate
-              pageCount={totalPages}
-              pageRangeDisplayed={5}
-              marginPagesDisplayed={1}
-              onPageChange={handlePageChange}
-              forcePage={currentPage - 1}
-              containerClassName={css.pagination}
-              activeClassName={css.active}
-              nextLabel="→"
-              previousLabel="←"
-            />
-          )}
-        </>
+      {isLoading && <Loader />}
+      {isError && <ErrorMessage />}
+      {movies.length > 0 && (
+        <MovieGrid movies={movies} onSelect={handleSelect} />
       )}
       {selectedMovie && (
         <MovieModal movie={selectedMovie} onClose={closeModal} />
       )}
-      {isError && <ErrorMessage />}
     </div>
   );
 }
